@@ -1,0 +1,95 @@
+const SLACK_INCOMING_HOOK_URL = "__HERE__";
+
+function initToken() {
+  let ui = SpreadsheetApp.getUi();
+
+  let uuid = Utilities.getUuid();
+  let url1 = Utilities.formatString(
+      "https://misskey.io/miauth/%s?permission=read:account", uuid);
+  let prompt = Utilities.formatString(
+      "次の URL にアクセスして承認してください\n%s", url1);
+  ui.alert(prompt);
+
+  let url2 =
+      Utilities.formatString("https://misskey.io/api/miauth/%s/check", uuid);
+  let r = UrlFetchApp.fetch(url2, {
+    method : "POST",
+    contentType : "application/json",
+    payload : JSON.stringify({dummy : "dummy"}),
+    muteHttpExceptions : true
+  });
+  let j = JSON.parse(r.getContentText());
+  if (!j["ok"]) {
+    ui.alert("認証に失敗しました");
+  } else {
+    SpreadsheetApp.getActiveSheet().getRange("A1").setValue(j["token"]);
+    ui.alert(
+        "認証に成功しました\nA1セルにトークンが記載されていることを確認してください (この値を公開するとあなたのアカウントが乗っ取られるので注意してください)");
+  }
+}
+
+function CheckTimeline() {
+  // Token が無ければ取得を試みる
+  if (!SpreadsheetApp.getActiveSheet().getRange("A1").getValue()) {
+    initToken();
+  }
+  let token = SpreadsheetApp.getActiveSheet().getRange("A1").getValue();
+
+  // since_id を取得
+  let sinceid = SpreadsheetApp.getActiveSheet().getRange("A2").getValue();
+
+  // 最大でも直近 500 Note しか取得しない
+  let notes = Array();
+  let untilid = ""
+  for (let i = 0; i < 2; ++i) {
+    let payload = {};
+    payload["limit"] = 10;
+    payload["withFiles"] = true;
+    payload["withRenotes"] = false;
+
+    if (sinceid) {
+      payload["sinceId"] = sinceid;
+    }
+    if (untilid) {
+      payload["untilId"] = untilid;
+    }
+    console.log(untilid);
+    console.log(payload);
+
+    let r = UrlFetchApp.fetch("https://misskey.io/api/notes/timeline", {
+      method : "POST",
+      headers : {"Authorization" : "Bearer " + token},
+      contentType : "application/json",
+      payload : JSON.stringify(payload)
+    });
+    for (const note of JSON.parse(r)) {
+      notes.push(note);
+      untilid = note["id"];
+    }
+  }
+
+  // slack 通知
+  for (const note of notes) {
+    let urls = "";
+    for (file of note["files"]) {
+      urls = urls + "\n" + file["url"];
+    }
+
+    let subj = note["user"]["name"] + " - " + note["user"]["username"];
+    let msg = note["text"] + urls + "\n" +
+              "https://misskey.io/notes/" + note["id"];
+    UrlFetchApp.fetch(SLACK_INCOMING_HOOK_URL, {
+      method : "POST",
+      contentType : "application/json",
+      payload : JSON.stringify({
+        "text" : Utilities.formatString("*%s*:\n%s", subj, msg),
+        "unfurl_links" : true
+      })
+    });
+  }
+
+  // sinceid を更新
+  if (notes.length != 0) {
+    SpreadsheetApp.getActiveSheet().getRange("A2").setValue(notes[0].id);
+  }
+}

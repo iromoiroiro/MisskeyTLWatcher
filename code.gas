@@ -41,7 +41,7 @@ function CheckTimeline() {
   // 最大でも直近 500 Note しか取得しない
   let notes = Array();
   let untilid = ""
-  for (let i = 0; i < 2; ++i) {
+  for (let i = 0; i < 50; ++i) {
     let payload = {};
     payload["limit"] = 10;
     payload["withFiles"] = true;
